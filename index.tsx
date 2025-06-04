@@ -1,60 +1,30 @@
-import definePlugin from "@utils/types";
-import { findByProps, findComponentByCodeLazy } from "@webpack";
-import { React } from "@webpack/common";
+import definePlugin from "@utils/types";               // Função para registrar o plugin no Vencord
+import { findByProps, findComponentByCodeLazy } from "@webpack"; // Helpers para buscar módulos internos
+import { React } from "@webpack/common";               // React usado para criar componentes
 
-let originalVoiceStateUpdate: any;
-let fakeDeafenEnabled = false;
+let originalVoiceStateUpdate: any;                     // Guarda o método original de voiceStateUpdate
+let fakeDeafenEnabled = false;                        // Flag que indica se o “fake deafen” está ativo
 
+// Componente Button genérico obtido via busca de código
 const Button = findComponentByCodeLazy(".NONE,disabled:", ".PANEL_BUTTON");
 
+/** Ícone que muda de cor quando o fake deafen está ativado/desativado */
 function FakeDeafenIcon() {
     return (
         <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
-            {/* Hat (brim + crown) */}
-            <rect
-                x="6"
-                y="8"
-                width="20"
-                height="4"
-                rx="2"
-                fill={fakeDeafenEnabled ? "#fff" : "#888"}
-            />
-            <rect
-                x="11"
-                y="3"
-                width="10"
-                height="8"
-                rx="3"
-                fill={fakeDeafenEnabled ? "#fff" : "#888"}
-            />
-            {/* Glasses */}
-            <circle
-                cx="10"
-                cy="21"
-                r="4"
-                stroke={fakeDeafenEnabled ? "#fff" : "#888"}
-                strokeWidth="2"
-                fill="none"
-            />
-            <circle
-                cx="22"
-                cy="21"
-                r="4"
-                stroke={fakeDeafenEnabled ? "#fff" : "#888"}
-                strokeWidth="2"
-                fill="none"
-            />
-            {/* Glasses bridge */}
-            <path
-                d="M14 21c1 1 3 1 4 0"
-                stroke={fakeDeafenEnabled ? "#fff" : "#888"}
-                strokeWidth="2"
-                strokeLinecap="round"
-            />
+            {/* Chapéu */}
+            <rect x="6" y="8" width="20" height="4" rx="2" fill={fakeDeafenEnabled ? "#fff" : "#888"} />
+            <rect x="11" y="3" width="10" height="8" rx="3" fill={fakeDeafenEnabled ? "#fff" : "#888"} />
+            {/* Óculos */}
+            <circle cx="10" cy="21" r="4" stroke={fakeDeafenEnabled ? "#fff" : "#888"} strokeWidth="2" fill="none" />
+            <circle cx="22" cy="21" r="4" stroke={fakeDeafenEnabled ? "#fff" : "#888"} strokeWidth="2" fill="none" />
+            {/* Ponte dos óculos */}
+            <path d="M14 21c1 1 3 1 4 0" stroke={fakeDeafenEnabled ? "#fff" : "#888"} strokeWidth="2" strokeLinecap="round" />
         </svg>
     );
 }
 
+/** Componente de botão que ativa/desativa o fake deafen */
 function FakeDeafenButton() {
     return (
         <Button
@@ -64,16 +34,22 @@ function FakeDeafenButton() {
             aria-checked={fakeDeafenEnabled}
             redGlow={fakeDeafenEnabled}
             onClick={() => {
+                // Inverte o estado
                 fakeDeafenEnabled = !fakeDeafenEnabled;
+
+                // Obtém stores necessários
                 const ChannelStore = findByProps("getChannel", "getDMFromUserId");
                 const SelectedChannelStore = findByProps("getVoiceChannelId");
                 const GatewayConnection = findByProps("voiceStateUpdate", "voiceServerPing");
                 const MediaEngineStore = findByProps("isDeaf", "isMute");
+
                 if (ChannelStore && SelectedChannelStore && GatewayConnection && typeof GatewayConnection.voiceStateUpdate === "function") {
                     const channelId = SelectedChannelStore.getVoiceChannelId?.();
                     const channel = channelId ? ChannelStore.getChannel?.(channelId) : null;
+
                     if (channel) {
                         if (fakeDeafenEnabled) {
+                            // Ao ativar, força mute+deaf falsos
                             GatewayConnection.voiceStateUpdate({
                                 channelId: channel.id,
                                 guildId: channel.guild_id,
@@ -81,6 +57,7 @@ function FakeDeafenButton() {
                                 selfDeaf: true
                             });
                         } else {
+                            // Ao desativar, restaura estado real do usuário
                             const selfMute = MediaEngineStore?.isMute?.() ?? false;
                             const selfDeaf = MediaEngineStore?.isDeaf?.() ?? false;
                             GatewayConnection.voiceStateUpdate({
@@ -97,12 +74,14 @@ function FakeDeafenButton() {
     );
 }
 
+// Registro do plugin
 export default definePlugin({
     name: "FakeDeafen",
-    description: "Adds a button to fake deafen yourself in voice channels. When enabled, you appear deafened and muted to others, but you can still hear and speak.",
+    description: "Adiciona um botão para fingir que você está deaf/mute em canais de voz.",
     authors: [{ name: "hyyven", id: 449282863582412850n }],
     patches: [
         {
+            // Injeta o botão na UI de “falando enquanto está mudo”
             find: "#{intl::ACCOUNT_SPEAKING_WHILE_MUTED}",
             replacement: {
                 match: /className:\i\.buttons,.{0,50}children:\[/,
@@ -110,11 +89,12 @@ export default definePlugin({
             }
         }
     ],
-    FakeDeafenButton,
+    FakeDeafenButton,  // Expõe o componente para patch
     start() {
+        // Ao iniciar, sobrescreve voiceStateUpdate para sempre aplicar fakeDeafenEnabled
         const GatewayConnection = findByProps("voiceStateUpdate", "voiceServerPing");
         if (!GatewayConnection || typeof GatewayConnection.voiceStateUpdate !== "function") {
-            console.warn("[FakeDeafen] GatewayConnection.voiceStateUpdate not found");
+            console.warn("[FakeDeafen] GatewayConnection.voiceStateUpdate não encontrado");
         } else {
             originalVoiceStateUpdate = GatewayConnection.voiceStateUpdate;
             GatewayConnection.voiceStateUpdate = function (args) {
@@ -127,6 +107,7 @@ export default definePlugin({
         }
     },
     stop() {
+        // Ao parar, restaura o método original
         const GatewayConnection = findByProps("voiceStateUpdate", "voiceServerPing");
         if (GatewayConnection && originalVoiceStateUpdate) {
             GatewayConnection.voiceStateUpdate = originalVoiceStateUpdate;
